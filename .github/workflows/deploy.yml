@@ -1,0 +1,59 @@
+name: Deploy
+
+on:
+  push:
+    branches: [ main ]
+
+  repository_dispatch:
+    types: [ autograder_update ]
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Start deployment
+        uses: bobheadxi/deployments@v0.5.2
+        id: deployment
+        with:
+          step: start
+          token: ${{ secrets.GITHUB_TOKEN }}
+          env: production
+
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Setup JDK and Maven
+        uses: actions/setup-java@v1
+        with:
+          java-version: 11
+
+      - name: Load Maven repository from cache 
+        uses: actions/cache@v1
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2
+
+      - name: Build JAR
+        run: |
+          mvn -DskipTests -B package
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Deploy to Docker Hub
+        run: |
+          docker login -u pucsbridgebot -p $DOCKER_PASS
+          docker build -t purduecsbridge/${{ github.event.repository.name }}:latest .
+          docker push purduecsbridge/${{ github.event.repository.name }}:latest
+        env:
+          DOCKER_PASS: ${{ secrets.DOCKER_PASS }}
+
+      - name: Update deployment status
+        uses: bobheadxi/deployments@v0.5.2
+        with:
+          step: finish
+          token: ${{ secrets.GITHUB_TOKEN }}
+          status: ${{ job.status }}
+          deployment_id: ${{ steps.deployment.outputs.deployment_id }}
+          env_url: https://hub.docker.com/repository/docker/purduecsbridge/${{ github.event.repository.name }}/tags
